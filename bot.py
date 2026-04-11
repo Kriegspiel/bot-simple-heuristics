@@ -6,10 +6,11 @@ a few cheap heuristics:
 1. if the opponent just captured and a move can land on that square, try the
    recapture immediately
 2. if a pawn can promote, try queen promotion first
-3. otherwise use a geometric fallback policy:
+3. otherwise choose one action source with geometric weights:
    - 50% chance to ask any pawn captures when that action is available
-   - then weight move attempts by length: 50%, 25%, 12.5%, ... over the
-     remaining ranked moves
+   - otherwise choose a piece, ranked by the longest move that piece can make
+4. once a piece is chosen, try that piece's moves from longest to shortest
+5. if all moves for that piece fail, choose again from the remaining pieces
 """
 
 from __future__ import annotations
@@ -313,16 +314,19 @@ def choose_geometric_item(items: list[str], *, rng: random.Random = random) -> s
     return items[-1]
 
 
-def sample_geometric_move_order(allowed_moves: list[str], *, rng: random.Random = random) -> list[str]:
-    remaining = sort_moves_longest_first(allowed_moves)
-    ordered: list[str] = []
-    while remaining:
-        selected = choose_geometric_item(remaining, rng=rng)
-        if selected is None:
-            break
-        ordered.append(selected)
-        remaining.remove(selected)
-    return ordered
+def piece_move_groups(allowed_moves: list[str]) -> list[tuple[str, list[str]]]:
+    grouped: dict[str, list[str]] = {}
+    for move in sort_moves_longest_first(allowed_moves):
+        if not isinstance(move, str) or len(move) < 4:
+            continue
+        grouped.setdefault(move[:2].lower(), []).append(move)
+
+    def sort_key(item: tuple[str, list[str]]) -> tuple[int, str]:
+        square, moves = item
+        longest = move_distance(moves[0]) if moves else -1
+        return (-longest, square)
+
+    return sorted(grouped.items(), key=sort_key)
 
 
 def queen_promotion_moves(allowed_moves: list[str]) -> list[str]:
@@ -376,19 +380,26 @@ def priority_moves(state: dict) -> list[str]:
     return []
 
 
-def choose_heuristic_moves(state: dict, *, rng: random.Random = random) -> list[str]:
-    special_moves = priority_moves(state)
-    if special_moves:
-        return special_moves
-    return sample_geometric_move_order(state.get("allowed_moves", []), rng=rng)
+def choose_piece_or_ask_any(
+    state: dict,
+    *,
+    excluded_pieces: set[str] | None = None,
+    allow_ask_any: bool = True,
+    rng: random.Random = random,
+) -> tuple[str, str | None]:
+    excluded = excluded_pieces or set()
+    ranked_pieces = [square for square, _moves in piece_move_groups(state.get("allowed_moves", [])) if square not in excluded]
+    options: list[tuple[str, str | None]] = []
+    if allow_ask_any and "ask_any" in state.get("possible_actions", []):
+        options.append(("ask_any", None))
+    options.extend(("piece", square) for square in ranked_pieces)
+    selected = choose_geometric_item(options, rng=rng)
+    return selected if selected is not None else ("none", None)
 
 
-def should_ask_any(state: dict, *, rng: random.Random = random) -> bool:
-    if "ask_any" not in state.get("possible_actions", []):
-        return False
-    if priority_moves(state):
-        return False
-    return rng.random() < ASK_ANY_PROBABILITY
+def moves_for_piece(state: dict, square: str) -> list[str]:
+    target_square = square.strip().lower()
+    return [move for origin, moves in piece_move_groups(state.get("allowed_moves", [])) if origin == target_square for move in moves]
 
 
 def try_moves(game_id: str, moves: list[str]) -> bool:
@@ -409,16 +420,45 @@ def maybe_play_game(game_id: str, *, rng: random.Random = random) -> bool:
     if state.get("state") != "active" or state.get("turn") != state.get("your_color"):
         return False
 
-    if should_ask_any(state, rng=rng):
-        result = post_json(f"/api/game/{game_id}/ask-any")
-        logger.debug("%s: ask-any -> %s", game_id, result["announcement"])
-        state = get_json(f"/api/game/{game_id}/state")
-        if state.get("state") != "active" or state.get("turn") != state.get("your_color"):
-            return False
+    special_moves = priority_moves(state)
+    if special_moves:
+        return try_moves(game_id, special_moves)
 
     if "move" not in state.get("possible_actions", []):
         return False
-    return try_moves(game_id, choose_heuristic_moves(state, rng=rng))
+
+    allow_ask_any = True
+    excluded_pieces: set[str] = set()
+    while True:
+        choice_kind, choice_value = choose_piece_or_ask_any(
+            state,
+            excluded_pieces=excluded_pieces,
+            allow_ask_any=allow_ask_any,
+            rng=rng,
+        )
+        if choice_kind == "none":
+            return False
+
+        if choice_kind == "ask_any":
+            result = post_json(f"/api/game/{game_id}/ask-any")
+            logger.debug("%s: ask-any -> %s", game_id, result["announcement"])
+            allow_ask_any = False
+            excluded_pieces.clear()
+            state = get_json(f"/api/game/{game_id}/state")
+            if state.get("state") != "active" or state.get("turn") != state.get("your_color"):
+                return False
+            special_moves = priority_moves(state)
+            if special_moves:
+                return try_moves(game_id, special_moves)
+            if "move" not in state.get("possible_actions", []):
+                return False
+            continue
+
+        assert choice_kind == "piece"
+        assert choice_value is not None
+        if try_moves(game_id, moves_for_piece(state, choice_value)):
+            return True
+        excluded_pieces.add(choice_value)
 
 
 def run_loop(poll_seconds: float) -> None:

@@ -12,10 +12,12 @@ Simple heuristic Kriegspiel bot.
 - caps itself at `5` active games in parallel
 - if the opponent just captured, it immediately tries to recapture on that square
 - if a pawn can promote, it prefers promotion to queen
-- otherwise it uses a geometric fallback:
+- otherwise it uses a geometric piece-selection fallback:
   - `50%` chance to ask any pawn captures when available
-  - then the remaining move attempts are sampled by length with halving weights
-  - longest move gets first weight, then the next longest, and so on
+  - otherwise it ranks pieces by the longest move each piece can make
+  - piece choice then uses halving weights: `50%`, `25%`, `12.5%`, ...
+  - once a piece is chosen, it tries that piece's moves from longest to shortest
+  - if all moves for that piece fail, it chooses again from the remaining pieces
 
 ## Setup
 

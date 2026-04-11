@@ -19,7 +19,17 @@ class BotTests(unittest.TestCase):
             ["a1a8", "a2a4", "b1c3"],
         )
 
-    def test_sample_geometric_move_order_uses_weighted_choices(self) -> None:
+    def test_piece_move_groups_rank_pieces_by_longest_available_move(self) -> None:
+        self.assertEqual(
+            bot.piece_move_groups(["a2a4", "a1a8", "a1a3", "b1h7", "b1c3"]),
+            [
+                ("a1", ["a1a8", "a1a3"]),
+                ("b1", ["b1h7", "b1c3"]),
+                ("a2", ["a2a4"]),
+            ],
+        )
+
+    def test_choose_piece_or_ask_any_uses_geometric_option_weights(self) -> None:
         class SequenceRng:
             def __init__(self, values: list[float]):
                 self._values = list(values)
@@ -27,9 +37,13 @@ class BotTests(unittest.TestCase):
             def random(self) -> float:
                 return self._values.pop(0)
 
-        order = bot.sample_geometric_move_order(["a2a4", "a1a8", "b1c3"], rng=SequenceRng([0.6, 0.9]))
-
-        self.assertEqual(order, ["a2a4", "b1c3", "a1a8"])
+        state = {
+            "possible_actions": ["move", "ask_any"],
+            "allowed_moves": ["a2a4", "a1a8", "b1c3"],
+        }
+        self.assertEqual(bot.choose_piece_or_ask_any(state, rng=SequenceRng([0.0])), ("ask_any", None))
+        self.assertEqual(bot.choose_piece_or_ask_any(state, rng=SequenceRng([0.6])), ("piece", "a1"))
+        self.assertEqual(bot.choose_piece_or_ask_any(state, rng=SequenceRng([0.9])), ("piece", "b1"))
 
     def test_recapture_moves_target_latest_opponent_capture_square(self) -> None:
         state = {
@@ -123,17 +137,18 @@ class BotTests(unittest.TestCase):
             ],
         )
 
-    def test_maybe_play_game_retries_weighted_moves_until_one_succeeds(self) -> None:
+    def test_maybe_play_game_retries_selected_piece_then_falls_back_to_next_piece(self) -> None:
         state = {
             "state": "active",
             "turn": "white",
             "your_color": "white",
             "possible_actions": ["move"],
-            "allowed_moves": ["a2a4", "a1a8", "b1c3"],
+            "allowed_moves": ["a1a8", "a1a7", "b1c3"],
             "referee_log": [],
         }
         posts: list[tuple[str, dict | None]] = []
         results = [
+            {"announcement": "Illegal move", "move_done": False},
             {"announcement": "Illegal move", "move_done": False},
             {"announcement": "Move complete", "move_done": True},
         ]
@@ -152,13 +167,14 @@ class BotTests(unittest.TestCase):
         with patch.object(bot, "get_json", return_value=state):
             with patch.object(bot, "post_json", side_effect=fake_post_json):
                 with patch.object(bot.time, "sleep") as sleep_mock:
-                    self.assertTrue(bot.maybe_play_game("game-1", rng=SequenceRng([0.6, 0.0])))
+                    self.assertTrue(bot.maybe_play_game("game-1", rng=SequenceRng([0.0, 0.0])))
 
         self.assertEqual(
             posts,
             [
-                ("/api/game/game-1/move", {"uci": "a2a4"}),
                 ("/api/game/game-1/move", {"uci": "a1a8"}),
+                ("/api/game/game-1/move", {"uci": "a1a7"}),
+                ("/api/game/game-1/move", {"uci": "b1c3"}),
             ],
         )
         sleep_mock.assert_called_once_with(bot.FAILED_MOVE_RETRY_DELAY_SECONDS)
