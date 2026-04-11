@@ -12,8 +12,10 @@ Simple heuristic Kriegspiel bot.
 - caps itself at `5` active games in parallel
 - if the opponent just captured, it immediately tries to recapture on that square
 - if a pawn can promote, it prefers promotion to queen
-- if `ask any pawn captures?` is available, it uses that with `50%` probability
-- otherwise it tries the longest move attempts first
+- otherwise it uses a geometric fallback:
+  - `50%` chance to ask any pawn captures when available
+  - then the remaining move attempts are sampled by length with halving weights
+  - longest move gets first weight, then the next longest, and so on
 
 ## Setup
 

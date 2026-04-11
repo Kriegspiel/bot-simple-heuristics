@@ -19,6 +19,18 @@ class BotTests(unittest.TestCase):
             ["a1a8", "a2a4", "b1c3"],
         )
 
+    def test_sample_geometric_move_order_uses_weighted_choices(self) -> None:
+        class SequenceRng:
+            def __init__(self, values: list[float]):
+                self._values = list(values)
+
+            def random(self) -> float:
+                return self._values.pop(0)
+
+        order = bot.sample_geometric_move_order(["a2a4", "a1a8", "b1c3"], rng=SequenceRng([0.6, 0.9]))
+
+        self.assertEqual(order, ["a2a4", "b1c3", "a1a8"])
+
     def test_recapture_moves_target_latest_opponent_capture_square(self) -> None:
         state = {
             "your_color": "white",
@@ -111,7 +123,7 @@ class BotTests(unittest.TestCase):
             ],
         )
 
-    def test_maybe_play_game_retries_longest_moves_until_one_succeeds(self) -> None:
+    def test_maybe_play_game_retries_weighted_moves_until_one_succeeds(self) -> None:
         state = {
             "state": "active",
             "turn": "white",
@@ -130,16 +142,23 @@ class BotTests(unittest.TestCase):
             posts.append((path, payload))
             return results.pop(0)
 
+        class SequenceRng:
+            def __init__(self, values: list[float]):
+                self._values = list(values)
+
+            def random(self) -> float:
+                return self._values.pop(0)
+
         with patch.object(bot, "get_json", return_value=state):
             with patch.object(bot, "post_json", side_effect=fake_post_json):
                 with patch.object(bot.time, "sleep") as sleep_mock:
-                    self.assertTrue(bot.maybe_play_game("game-1"))
+                    self.assertTrue(bot.maybe_play_game("game-1", rng=SequenceRng([0.6, 0.0])))
 
         self.assertEqual(
             posts,
             [
-                ("/api/game/game-1/move", {"uci": "a1a8"}),
                 ("/api/game/game-1/move", {"uci": "a2a4"}),
+                ("/api/game/game-1/move", {"uci": "a1a8"}),
             ],
         )
         sleep_mock.assert_called_once_with(bot.FAILED_MOVE_RETRY_DELAY_SECONDS)
