@@ -1,13 +1,15 @@
 """Simple heuristic Kriegspiel bot.
 
-This bot keeps the same small polling-loop shape as the random bots, but its
-move ordering is slightly less naive:
+This bot keeps the same small polling-loop shape as the random bots, but uses
+a few cheap heuristics:
 
 1. if the opponent just captured and a move can land on that square, try the
    recapture immediately
 2. if a pawn can promote, try queen promotion first
-3. if "ask any pawn captures?" is available, use it with 50% probability
-4. otherwise try the longest-looking move attempts first
+3. otherwise use a geometric fallback policy:
+   - 50% chance to ask any pawn captures when that action is available
+   - then weight move attempts by length: 50%, 25%, 12.5%, ... over the
+     remaining ranked moves
 """
 
 from __future__ import annotations
@@ -292,6 +294,37 @@ def sort_moves_longest_first(allowed_moves: list[str]) -> list[str]:
     return sorted(valid_moves, key=lambda move: (-move_distance(move), move))
 
 
+def choose_geometric_item(items: list[str], *, rng: random.Random = random) -> str | None:
+    if not items:
+        return None
+    if len(items) == 1:
+        return items[0]
+
+    roll = rng.random()
+    cumulative = 0.0
+    weight = 0.5
+    for index, item in enumerate(items):
+        if index == len(items) - 1:
+            return item
+        cumulative += weight
+        if roll < cumulative:
+            return item
+        weight /= 2
+    return items[-1]
+
+
+def sample_geometric_move_order(allowed_moves: list[str], *, rng: random.Random = random) -> list[str]:
+    remaining = sort_moves_longest_first(allowed_moves)
+    ordered: list[str] = []
+    while remaining:
+        selected = choose_geometric_item(remaining, rng=rng)
+        if selected is None:
+            break
+        ordered.append(selected)
+        remaining.remove(selected)
+    return ordered
+
+
 def queen_promotion_moves(allowed_moves: list[str]) -> list[str]:
     promotions = [move for move in allowed_moves if len(move) >= 5 and move[4].lower() == "q"]
     return sort_moves_longest_first(promotions)
@@ -343,11 +376,11 @@ def priority_moves(state: dict) -> list[str]:
     return []
 
 
-def choose_heuristic_moves(state: dict) -> list[str]:
+def choose_heuristic_moves(state: dict, *, rng: random.Random = random) -> list[str]:
     special_moves = priority_moves(state)
     if special_moves:
         return special_moves
-    return sort_moves_longest_first(state.get("allowed_moves", []))
+    return sample_geometric_move_order(state.get("allowed_moves", []), rng=rng)
 
 
 def should_ask_any(state: dict, *, rng: random.Random = random) -> bool:
@@ -385,7 +418,7 @@ def maybe_play_game(game_id: str, *, rng: random.Random = random) -> bool:
 
     if "move" not in state.get("possible_actions", []):
         return False
-    return try_moves(game_id, choose_heuristic_moves(state))
+    return try_moves(game_id, choose_heuristic_moves(state, rng=rng))
 
 
 def run_loop(poll_seconds: float) -> None:
