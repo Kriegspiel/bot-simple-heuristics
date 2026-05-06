@@ -71,7 +71,7 @@ class BotTests(unittest.TestCase):
             with patch.object(bot, "post_json", return_value={"announcement": "Move complete", "move_done": True}) as post_json:
                 self.assertTrue(bot.maybe_play_game("game-1"))
 
-        post_json.assert_called_once_with("/api/game/game-1/move", {"uci": "e4d5"})
+        post_json.assert_called_once_with("/game/game-1/move", {"uci": "e4d5"})
 
     def test_maybe_play_game_prefers_queen_promotion_before_ask_any(self) -> None:
         state = {
@@ -87,7 +87,7 @@ class BotTests(unittest.TestCase):
             with patch.object(bot, "post_json", return_value={"announcement": "Move complete", "move_done": True}) as post_json:
                 self.assertTrue(bot.maybe_play_game("game-1"))
 
-        post_json.assert_called_once_with("/api/game/game-1/move", {"uci": "e7e8q"})
+        post_json.assert_called_once_with("/game/game-1/move", {"uci": "e7e8q"})
 
     def test_maybe_play_game_asks_any_with_probability_before_generic_moves(self) -> None:
         states = [
@@ -111,7 +111,7 @@ class BotTests(unittest.TestCase):
         posts: list[tuple[str, dict | None]] = []
 
         def fake_get_json(path: str) -> dict:
-            self.assertEqual(path, "/api/game/game-1/state")
+            self.assertEqual(path, "/game/game-1/state")
             return states.pop(0)
 
         def fake_post_json(path: str, payload: dict | None = None) -> dict:
@@ -132,8 +132,8 @@ class BotTests(unittest.TestCase):
         self.assertEqual(
             posts,
             [
-                ("/api/game/game-1/ask-any", None),
-                ("/api/game/game-1/move", {"uci": "a1a8"}),
+                ("/game/game-1/ask-any", None),
+                ("/game/game-1/move", {"uci": "a1a8"}),
             ],
         )
 
@@ -172,9 +172,9 @@ class BotTests(unittest.TestCase):
         self.assertEqual(
             posts,
             [
-                ("/api/game/game-1/move", {"uci": "a1a8"}),
-                ("/api/game/game-1/move", {"uci": "a1a7"}),
-                ("/api/game/game-1/move", {"uci": "b1c3"}),
+                ("/game/game-1/move", {"uci": "a1a8"}),
+                ("/game/game-1/move", {"uci": "a1a7"}),
+                ("/game/game-1/move", {"uci": "b1c3"}),
             ],
         )
         sleep_mock.assert_called_once_with(bot.FAILED_MOVE_RETRY_DELAY_SECONDS)
@@ -199,9 +199,9 @@ class BotTests(unittest.TestCase):
             open_games = {"games": [{"game_code": "BOT123", "created_by": "gptnano", "rule_variant": "berkeley_any"}]}
 
             def fake_get_json(path: str) -> dict:
-                if path == "/api/game/mine":
+                if path == "/game/mine":
                     return mine
-                if path == "/api/game/open":
+                if path == "/game/open":
                     return open_games
                 raise AssertionError(path)
 
@@ -225,7 +225,7 @@ class BotTests(unittest.TestCase):
                 with patch.object(bot, "post_json", return_value={"game_id": "g1", "game_code": "ABC123"}) as post_json:
                     self.assertTrue(bot.maybe_create_lobby_game([]))
 
-        post_json.assert_called_once_with("/api/game/create", bot.create_payload())
+        post_json.assert_called_once_with("/game/create", bot.create_payload())
 
 
 if __name__ == "__main__":

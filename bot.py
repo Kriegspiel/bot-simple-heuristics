@@ -92,7 +92,7 @@ def maybe_restore_token() -> None:
 
 def register_bot() -> None:
     response = requests.post(
-        f"{base_url()}/api/auth/bots/register",
+        f"{base_url()}/auth/bots/register",
         headers={"X-Bot-Registration-Key": os.environ["KRIEGSPIEL_BOT_REGISTRATION_KEY"]},
         json={
             "username": os.environ["KRIEGSPIEL_BOT_USERNAME"],
@@ -116,7 +116,7 @@ def get_json(path: str) -> dict:
 
 
 def get_public_user(username: str) -> dict:
-    response = requests.get(f"{base_url()}/api/user/{username}", headers=auth_headers(), timeout=DEFAULT_TIMEOUT_SECONDS)
+    response = requests.get(f"{base_url()}/user/{username}", headers=auth_headers(), timeout=DEFAULT_TIMEOUT_SECONDS)
     response.raise_for_status()
     return response.json()
 
@@ -227,13 +227,13 @@ def choose_bot_game_to_join(open_games: list[dict], *, rng: random.Random = rand
 
 
 def maybe_join_bot_lobby_game(*, rng: random.Random = random) -> bool:
-    mine = get_json("/api/game/mine")
+    mine = get_json("/game/mine")
     if not under_active_game_limit(mine.get("games", [])):
         return False
     if not can_attempt_bot_join():
         return False
 
-    open_games = get_json("/api/game/open").get("games", [])
+    open_games = get_json("/game/open").get("games", [])
     candidate = choose_bot_game_to_join(open_games, rng=rng)
     if not candidate:
         return False
@@ -246,7 +246,7 @@ def maybe_join_bot_lobby_game(*, rng: random.Random = random) -> bool:
     if not isinstance(game_code, str) or not game_code.strip():
         return False
 
-    joined = post_json(f"/api/game/join/{game_code.strip()}")
+    joined = post_json(f"/game/join/{game_code.strip()}")
     logger.debug("joined bot lobby game %s (%s)", joined["game_id"], joined["game_code"])
     return True
 
@@ -263,11 +263,11 @@ def maybe_create_lobby_game(games: list[dict]) -> bool:
     if not should_create_lobby_game(games):
         return False
 
-    open_games = get_json("/api/game/open").get("games", [])
+    open_games = get_json("/game/open").get("games", [])
     if has_own_waiting_game(open_games):
         return False
 
-    created = post_json("/api/game/create", create_payload())
+    created = post_json("/game/create", create_payload())
     logger.debug("created lobby game %s (%s)", created["game_id"], created["game_code"])
     return True
 
@@ -406,7 +406,7 @@ def try_moves(game_id: str, moves: list[str]) -> bool:
     if not moves:
         return False
     for index, uci in enumerate(moves):
-        result = post_json(f"/api/game/{game_id}/move", {"uci": uci})
+        result = post_json(f"/game/{game_id}/move", {"uci": uci})
         logger.debug("%s: tried %s -> %s", game_id, uci, result["announcement"])
         if result.get("move_done"):
             return True
@@ -416,7 +416,7 @@ def try_moves(game_id: str, moves: list[str]) -> bool:
 
 
 def maybe_play_game(game_id: str, *, rng: random.Random = random) -> bool:
-    state = get_json(f"/api/game/{game_id}/state")
+    state = get_json(f"/game/{game_id}/state")
     if state.get("state") != "active" or state.get("turn") != state.get("your_color"):
         return False
 
@@ -440,11 +440,11 @@ def maybe_play_game(game_id: str, *, rng: random.Random = random) -> bool:
             return False
 
         if choice_kind == "ask_any":
-            result = post_json(f"/api/game/{game_id}/ask-any")
+            result = post_json(f"/game/{game_id}/ask-any")
             logger.debug("%s: ask-any -> %s", game_id, result["announcement"])
             allow_ask_any = False
             excluded_pieces.clear()
-            state = get_json(f"/api/game/{game_id}/state")
+            state = get_json(f"/game/{game_id}/state")
             if state.get("state") != "active" or state.get("turn") != state.get("your_color"):
                 return False
             special_moves = priority_moves(state)
@@ -464,7 +464,7 @@ def maybe_play_game(game_id: str, *, rng: random.Random = random) -> bool:
 def run_loop(poll_seconds: float) -> None:
     while True:
         try:
-            mine = get_json("/api/game/mine")
+            mine = get_json("/game/mine")
             games = mine.get("games", [])
             maybe_create_lobby_game(games)
             maybe_join_bot_lobby_game()
