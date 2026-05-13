@@ -199,7 +199,7 @@ class BotTests(unittest.TestCase):
             open_games = {"games": [{"game_code": "BOT123", "created_by": "gptnano", "rule_variant": "berkeley_any"}]}
 
             def fake_get_json(path: str) -> dict:
-                if path == "/game/mine":
+                if path == "/game/mine/active":
                     return mine
                 if path == "/game/open":
                     return open_games

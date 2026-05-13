@@ -227,7 +227,7 @@ def choose_bot_game_to_join(open_games: list[dict], *, rng: random.Random = rand
 
 
 def maybe_join_bot_lobby_game(*, rng: random.Random = random) -> bool:
-    mine = get_json("/game/mine")
+    mine = get_json("/game/mine/active")
     if not under_active_game_limit(mine.get("games", [])):
         return False
     if not can_attempt_bot_join():
@@ -464,7 +464,7 @@ def maybe_play_game(game_id: str, *, rng: random.Random = random) -> bool:
 def run_loop(poll_seconds: float) -> None:
     while True:
         try:
-            mine = get_json("/game/mine")
+            mine = get_json("/game/mine/active")
             games = mine.get("games", [])
             maybe_create_lobby_game(games)
             maybe_join_bot_lobby_game()
