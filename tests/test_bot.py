@@ -45,6 +45,66 @@ class BotTests(unittest.TestCase):
         self.assertEqual(bot.choose_piece_or_ask_any(state, rng=SequenceRng([0.6])), ("piece", "a1"))
         self.assertEqual(bot.choose_piece_or_ask_any(state, rng=SequenceRng([0.9])), ("piece", "b1"))
 
+    def test_supported_rule_variants_default_to_berkeley_family_and_wild16(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(bot.supported_rule_variants(), ["berkeley", "berkeley_any", "wild16"])
+
+    def test_supported_rule_variants_dedupe_and_ignore_unknown_rulesets(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"KRIEGSPIEL_SUPPORTED_RULE_VARIANTS": "wild16,standard,berkeley_any,wild16"},
+        ):
+            self.assertEqual(bot.supported_rule_variants(), ["wild16", "berkeley_any"])
+
+    def test_create_payload_accepts_wild16_when_configured(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "KRIEGSPIEL_SUPPORTED_RULE_VARIANTS": "berkeley,berkeley_any,wild16",
+                "KRIEGSPIEL_AUTO_CREATE_RULE_VARIANT": "wild16",
+            },
+        ):
+            self.assertEqual(bot.create_payload()["rule_variant"], "wild16")
+
+    def test_create_payload_falls_back_to_supported_rule_variant(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "KRIEGSPIEL_SUPPORTED_RULE_VARIANTS": "wild16",
+                "KRIEGSPIEL_AUTO_CREATE_RULE_VARIANT": "standard",
+            },
+        ):
+            self.assertEqual(bot.create_payload()["rule_variant"], "wild16")
+
+    def test_register_bot_advertises_wild16_by_default(self) -> None:
+        posts: list[dict] = []
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict:
+                return {"api_token": "token-123"}
+
+        def fake_post(*args, **kwargs):
+            posts.append(kwargs)
+            return FakeResponse()
+
+        env = {
+            "KRIEGSPIEL_API_BASE": "https://api.example.test",
+            "KRIEGSPIEL_BOT_REGISTRATION_KEY": "registration-key",
+            "KRIEGSPIEL_BOT_USERNAME": "simpleheuristics",
+            "KRIEGSPIEL_BOT_DISPLAY_NAME": "Simple Heuristics Bot",
+            "KRIEGSPIEL_BOT_OWNER_EMAIL": "bots@example.test",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.object(bot, "STATE_PATH", Path(temp_dir) / ".bot-state.json"):
+                with patch.dict("os.environ", env, clear=True):
+                    with patch.object(bot.requests, "post", side_effect=fake_post):
+                        bot.register_bot()
+
+        self.assertEqual(posts[0]["json"]["supported_rule_variants"], ["berkeley", "berkeley_any", "wild16"])
+
     def test_recapture_moves_target_latest_opponent_capture_square(self) -> None:
         state = {
             "your_color": "white",
@@ -184,13 +244,14 @@ class BotTests(unittest.TestCase):
             candidates = bot.open_bot_lobby_candidates(
                 [
                     {"game_code": "BOT123", "created_by": "gptnano", "rule_variant": "berkeley_any"},
+                    {"game_code": "WLD123", "created_by": "gptnano", "rule_variant": "wild16"},
                     {"game_code": "SELF12", "created_by": "simpleheuristics", "rule_variant": "berkeley_any"},
                     {"game_code": "HUM123", "created_by": "fil", "rule_variant": "berkeley_any"},
                 ],
                 profile_lookup=lambda username: {"role": "bot" if username == "gptnano" else "user"},
             )
 
-        self.assertEqual([game["game_code"] for game in candidates], ["BOT123"])
+        self.assertEqual([game["game_code"] for game in candidates], ["BOT123", "WLD123"])
 
     def test_maybe_join_bot_lobby_game_records_attempt_even_when_probability_misses(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
