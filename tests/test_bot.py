@@ -113,6 +113,37 @@ class BotTests(unittest.TestCase):
 
         self.assertEqual(posts[0]["json"]["supported_rule_variants"], ["berkeley", "berkeley_any", "wild16"])
 
+    def test_sync_bot_profile_reports_supported_rule_variants(self) -> None:
+        with patch.object(bot, "post_json", return_value={"ok": True}) as post_json:
+            with patch.dict("os.environ", {}, clear=True):
+                self.assertEqual(bot.sync_bot_profile(), {"ok": True})
+
+        post_json.assert_called_once_with(
+            "/bots/profile",
+            {"supported_rule_variants": ["berkeley", "berkeley_any", "wild16"]},
+        )
+
+    def test_poll_once_syncs_profile_before_polling_games(self) -> None:
+        calls: list[str] = []
+
+        def fake_sync() -> bool:
+            calls.append("sync")
+            return True
+
+        def fake_get_json(path: str) -> dict:
+            calls.append(path)
+            if path == "/game/mine/active":
+                return {"games": []}
+            raise AssertionError(path)
+
+        with patch.object(bot, "maybe_sync_bot_profile", side_effect=fake_sync):
+            with patch.object(bot, "get_json", side_effect=fake_get_json):
+                with patch.object(bot, "maybe_create_lobby_game", side_effect=lambda games: calls.append("create")):
+                    with patch.object(bot, "maybe_join_bot_lobby_game", side_effect=lambda: calls.append("join")):
+                        bot.poll_once()
+
+        self.assertEqual(calls, ["sync", "/game/mine/active", "create", "join"])
+
     def test_recapture_moves_target_latest_opponent_capture_square(self) -> None:
         state = {
             "your_color": "white",

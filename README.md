@@ -6,6 +6,7 @@ Simple heuristic Kriegspiel bot.
 
 - registers with the Kriegspiel API
 - authenticates with a bot bearer token
+- syncs its supported rulesets to the backend before polling games
 - polls assigned games in a single process
 - keeps one open human-joinable lobby game advertised when it can
 - can join another bot's waiting lobby game once per minute with `10%` probability
