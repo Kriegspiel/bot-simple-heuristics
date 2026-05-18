@@ -41,6 +41,7 @@ DEFAULT_SUPPORTED_RULE_VARIANTS = list(SUPPORTED_RULE_VARIANTS)
 LEGACY_DEFAULT_SUPPORTED_RULE_VARIANTS = ["berkeley", "berkeley_any"]
 DEFAULT_AUTO_CREATE_RULE_VARIANT = "berkeley_any"
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+_BOT_PROFILE_SYNCED = False
 
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -135,6 +136,20 @@ def post_json(path: str, payload: dict | None = None) -> dict:
     )
     response.raise_for_status()
     return response.json()
+
+
+def sync_bot_profile() -> dict:
+    return post_json("/bots/profile", {"supported_rule_variants": supported_rule_variants()})
+
+
+def maybe_sync_bot_profile() -> bool:
+    global _BOT_PROFILE_SYNCED
+    if _BOT_PROFILE_SYNCED:
+        return False
+    payload = sync_bot_profile()
+    _BOT_PROFILE_SYNCED = True
+    logger.info("synced bot profile: %s", payload.get("supported_rule_variants"))
+    return True
 
 
 def auto_create_enabled() -> bool:
@@ -478,15 +493,20 @@ def maybe_play_game(game_id: str, *, rng: random.Random = random) -> bool:
         excluded_pieces.add(choice_value)
 
 
+def poll_once() -> None:
+    maybe_sync_bot_profile()
+    mine = get_json("/game/mine/active")
+    games = mine.get("games", [])
+    maybe_create_lobby_game(games)
+    maybe_join_bot_lobby_game()
+    for game in active_games(games):
+        maybe_play_game(game["game_id"])
+
+
 def run_loop(poll_seconds: float) -> None:
     while True:
         try:
-            mine = get_json("/game/mine/active")
-            games = mine.get("games", [])
-            maybe_create_lobby_game(games)
-            maybe_join_bot_lobby_game()
-            for game in active_games(games):
-                maybe_play_game(game["game_id"])
+            poll_once()
         except requests.RequestException as exc:
             logger.warning("poll failed: %s", exc)
         time.sleep(poll_seconds)
