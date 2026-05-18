@@ -38,6 +38,7 @@ MAX_ACTIVE_GAMES = int(os.environ.get("KRIEGSPIEL_MAX_ACTIVE_GAMES", "5"))
 FAILED_MOVE_RETRY_DELAY_SECONDS = 1
 SUPPORTED_RULE_VARIANTS = ("berkeley", "berkeley_any", "wild16")
 DEFAULT_SUPPORTED_RULE_VARIANTS = list(SUPPORTED_RULE_VARIANTS)
+LEGACY_DEFAULT_SUPPORTED_RULE_VARIANTS = ["berkeley", "berkeley_any"]
 DEFAULT_AUTO_CREATE_RULE_VARIANT = "berkeley_any"
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
@@ -157,6 +158,8 @@ def supported_rule_variants() -> list[str]:
         value = item.strip()
         if value in SUPPORTED_RULE_VARIANTS and value not in variants:
             variants.append(value)
+    if variants == LEGACY_DEFAULT_SUPPORTED_RULE_VARIANTS:
+        return DEFAULT_SUPPORTED_RULE_VARIANTS.copy()
     return variants or DEFAULT_SUPPORTED_RULE_VARIANTS.copy()
 
 

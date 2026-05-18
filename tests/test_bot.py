@@ -56,6 +56,14 @@ class BotTests(unittest.TestCase):
         ):
             self.assertEqual(bot.supported_rule_variants(), ["wild16", "berkeley_any"])
 
+    def test_supported_rule_variants_expand_legacy_default_to_wild16(self) -> None:
+        with patch.dict("os.environ", {"KRIEGSPIEL_SUPPORTED_RULE_VARIANTS": "berkeley,berkeley_any"}):
+            self.assertEqual(bot.supported_rule_variants(), ["berkeley", "berkeley_any", "wild16"])
+
+    def test_supported_rule_variants_preserve_explicit_narrower_config(self) -> None:
+        with patch.dict("os.environ", {"KRIEGSPIEL_SUPPORTED_RULE_VARIANTS": "berkeley"}):
+            self.assertEqual(bot.supported_rule_variants(), ["berkeley"])
+
     def test_create_payload_accepts_wild16_when_configured(self) -> None:
         with patch.dict(
             "os.environ",
