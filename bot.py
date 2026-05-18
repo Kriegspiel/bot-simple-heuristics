@@ -8,6 +8,7 @@ a few cheap heuristics:
 2. if a pawn can promote, try queen promotion first
 3. otherwise choose one action source with geometric weights:
    - 50% chance to ask any pawn captures when that action is available
+     (Wild 16 has no ask-any action, so its pawn tries are ordinary moves)
    - otherwise choose a piece, ranked by the longest move that piece can make
 4. once a piece is chosen, try that piece's moves from longest to shortest
 5. if all moves for that piece fail, choose again from the remaining pieces
@@ -35,6 +36,9 @@ BOT_GAME_PICK_PROBABILITY = float(os.environ.get("BOT_GAME_PICK_PROBABILITY", "0
 ASK_ANY_PROBABILITY = float(os.environ.get("ASK_ANY_PROBABILITY", "0.5"))
 MAX_ACTIVE_GAMES = int(os.environ.get("KRIEGSPIEL_MAX_ACTIVE_GAMES", "5"))
 FAILED_MOVE_RETRY_DELAY_SECONDS = 1
+SUPPORTED_RULE_VARIANTS = ("berkeley", "berkeley_any", "wild16")
+DEFAULT_SUPPORTED_RULE_VARIANTS = list(SUPPORTED_RULE_VARIANTS)
+DEFAULT_AUTO_CREATE_RULE_VARIANT = "berkeley_any"
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(levelname)s %(message)s")
@@ -139,7 +143,7 @@ def auto_create_enabled() -> bool:
 
 def create_payload() -> dict[str, str]:
     return {
-        "rule_variant": os.environ.get("KRIEGSPIEL_AUTO_CREATE_RULE_VARIANT", "berkeley_any").strip() or "berkeley_any",
+        "rule_variant": auto_create_rule_variant(),
         "play_as": os.environ.get("KRIEGSPIEL_AUTO_CREATE_PLAY_AS", "random").strip() or "random",
         "time_control": "rapid",
         "opponent_type": "human",
@@ -147,13 +151,23 @@ def create_payload() -> dict[str, str]:
 
 
 def supported_rule_variants() -> list[str]:
-    raw = os.environ.get("KRIEGSPIEL_SUPPORTED_RULE_VARIANTS", "berkeley,berkeley_any")
+    raw = os.environ.get("KRIEGSPIEL_SUPPORTED_RULE_VARIANTS", ",".join(DEFAULT_SUPPORTED_RULE_VARIANTS))
     variants: list[str] = []
     for item in raw.split(","):
         value = item.strip()
-        if value in {"berkeley", "berkeley_any"} and value not in variants:
+        if value in SUPPORTED_RULE_VARIANTS and value not in variants:
             variants.append(value)
-    return variants or ["berkeley", "berkeley_any"]
+    return variants or DEFAULT_SUPPORTED_RULE_VARIANTS.copy()
+
+
+def auto_create_rule_variant() -> str:
+    configured = os.environ.get("KRIEGSPIEL_AUTO_CREATE_RULE_VARIANT", DEFAULT_AUTO_CREATE_RULE_VARIANT).strip()
+    supported = supported_rule_variants()
+    if configured in supported:
+        return configured
+    if DEFAULT_AUTO_CREATE_RULE_VARIANT in supported:
+        return DEFAULT_AUTO_CREATE_RULE_VARIANT
+    return supported[0]
 
 
 def active_games(games: list[dict]) -> list[dict]:

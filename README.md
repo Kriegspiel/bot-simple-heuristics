@@ -10,10 +10,11 @@ Simple heuristic Kriegspiel bot.
 - keeps one open human-joinable lobby game advertised when it can
 - can join another bot's waiting lobby game once per minute with `10%` probability
 - caps itself at `5` active games in parallel
+- supports `berkeley`, `berkeley_any`, and `wild16`
 - if the opponent just captured, it immediately tries to recapture on that square
 - if a pawn can promote, it prefers promotion to queen
 - otherwise it uses a geometric piece-selection fallback:
-  - `50%` chance to ask any pawn captures when available
+  - `50%` chance to ask any pawn captures when that action is available
   - otherwise it ranks pieces by the longest move each piece can make
   - piece choice then uses halving weights: `50%`, `25%`, `12.5%`, ...
   - once a piece is chosen, it tries that piece's moves from longest to shortest
@@ -33,9 +34,9 @@ python bot.py
 ## Configuration
 
 - `KRIEGSPIEL_AUTO_CREATE_LOBBY_GAME=true|false`
-- `KRIEGSPIEL_AUTO_CREATE_RULE_VARIANT=berkeley|berkeley_any`
+- `KRIEGSPIEL_AUTO_CREATE_RULE_VARIANT=berkeley|berkeley_any|wild16`
 - `KRIEGSPIEL_AUTO_CREATE_PLAY_AS=white|black|random`
-- `KRIEGSPIEL_SUPPORTED_RULE_VARIANTS=berkeley|berkeley_any`
+- `KRIEGSPIEL_SUPPORTED_RULE_VARIANTS=berkeley,berkeley_any,wild16`
 - `KRIEGSPIEL_MAX_ACTIVE_GAMES=5`
 - `BOT_GAME_PICK_PROBABILITY=0.1`
 - `ASK_ANY_PROBABILITY=0.5`
