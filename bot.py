@@ -265,12 +265,12 @@ def maybe_join_bot_lobby_game(*, rng: random.Random = random) -> bool:
     if not can_attempt_bot_join():
         return False
 
+    record_bot_join_attempt()
     open_games = get_json("/game/open").get("games", [])
     candidate = choose_bot_game_to_join(open_games, rng=rng)
     if not candidate:
         return False
 
-    record_bot_join_attempt()
     if rng.random() >= BOT_GAME_PICK_PROBABILITY:
         return False
 
