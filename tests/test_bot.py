@@ -311,13 +311,53 @@ class BotTests(unittest.TestCase):
                         with patch.object(bot, "get_public_user", return_value={"role": "bot"}):
                             with patch.object(bot.random, "choice", side_effect=lambda items: items[0]):
                                 with patch.object(bot.random, "random", return_value=0.9):
-                                    with patch.object(bot.time, "time", return_value=0.0):
+                                    with patch.object(bot.time, "time", return_value=100.0):
                                         with patch.object(bot, "post_json") as post_mock:
                                             self.assertFalse(bot.maybe_join_bot_lobby_game(rng=bot.random))
 
-                self.assertFalse(bot.can_attempt_bot_join(now=30.0))
-                self.assertTrue(bot.can_attempt_bot_join(now=61.0))
+                self.assertFalse(bot.can_attempt_bot_join(now=130.0))
+                self.assertTrue(bot.can_attempt_bot_join(now=161.0))
                 post_mock.assert_not_called()
+
+    def test_maybe_join_bot_lobby_game_records_sample_even_without_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / ".bot-state.json"
+
+            def fake_get_json(path: str) -> dict:
+                if path == "/game/mine/active":
+                    return {"games": []}
+                if path == "/game/open":
+                    return {"games": []}
+                raise AssertionError(path)
+
+            with patch.object(bot, "STATE_PATH", state_path):
+                with patch.object(bot, "get_json", side_effect=fake_get_json):
+                    with patch.object(bot.time, "time", return_value=100.0):
+                        with patch.object(bot, "post_json") as post_mock:
+                            self.assertFalse(bot.maybe_join_bot_lobby_game())
+
+                self.assertFalse(bot.can_attempt_bot_join(now=130.0))
+                self.assertTrue(bot.can_attempt_bot_join(now=161.0))
+                post_mock.assert_not_called()
+
+    def test_maybe_join_bot_lobby_game_skips_open_sample_during_cooldown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / ".bot-state.json"
+            calls: list[str] = []
+
+            def fake_get_json(path: str) -> dict:
+                calls.append(path)
+                if path == "/game/mine/active":
+                    return {"games": []}
+                raise AssertionError(path)
+
+            with patch.object(bot, "STATE_PATH", state_path):
+                bot.record_bot_join_attempt(now=100.0)
+                with patch.object(bot, "get_json", side_effect=fake_get_json):
+                    with patch.object(bot.time, "time", return_value=130.0):
+                        self.assertFalse(bot.maybe_join_bot_lobby_game())
+
+            self.assertEqual(calls, ["/game/mine/active"])
 
     def test_maybe_create_lobby_game_respects_active_limit_and_own_waiting_game(self) -> None:
         with patch.object(bot, "get_json", return_value={"games": []}):
