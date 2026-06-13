@@ -100,7 +100,6 @@ class BotTests(unittest.TestCase):
 
         env = {
             "KRIEGSPIEL_API_BASE": "https://api.example.test",
-            "KRIEGSPIEL_BOT_REGISTRATION_KEY": "registration-key",
             "KRIEGSPIEL_BOT_USERNAME": "simpleheuristics",
             "KRIEGSPIEL_BOT_DISPLAY_NAME": "Simple Heuristics Bot",
             "KRIEGSPIEL_BOT_OWNER_EMAIL": "bots@example.test",
@@ -112,6 +111,7 @@ class BotTests(unittest.TestCase):
                         bot.register_bot()
 
         self.assertEqual(posts[0]["json"]["supported_rule_variants"], ["berkeley", "berkeley_any", "wild16"])
+        self.assertNotIn("headers", posts[0])
 
     def test_sync_bot_profile_reports_supported_rule_variants(self) -> None:
         with patch.object(bot, "post_json", return_value={"ok": True}) as post_json:
