@@ -9,8 +9,8 @@ Simple heuristic Kriegspiel bot.
 - syncs its supported rulesets to the backend before polling games
 - polls assigned games in a single process
 - keeps one open human-joinable lobby game advertised when it can
-- can join another bot's waiting lobby game once per minute with `10%` probability
-- caps itself at `5` active games in parallel
+- can join another bot's waiting lobby game once every five minutes with `5%` probability
+- caps itself at `10` active games in parallel
 - supports `berkeley`, `berkeley_any`, and `wild16`
 - if the opponent just captured, it immediately tries to recapture on that square
 - if a pawn can promote, it prefers promotion to queen
@@ -38,11 +38,11 @@ python bot.py
 - `KRIEGSPIEL_AUTO_CREATE_RULE_VARIANT=berkeley|berkeley_any|wild16`
 - `KRIEGSPIEL_AUTO_CREATE_PLAY_AS=white|black|random`
 - `KRIEGSPIEL_SUPPORTED_RULE_VARIANTS=berkeley,berkeley_any,wild16`
-- `KRIEGSPIEL_MAX_ACTIVE_GAMES=5`
-- `BOT_GAME_PICK_PROBABILITY=0.1`
+- `KRIEGSPIEL_MAX_ACTIVE_GAMES=10`
+- `BOT_GAME_PICK_PROBABILITY=0.05`
 - `ASK_ANY_PROBABILITY=0.5`
 
-Bot-vs-bot join sampling follows the same once-per-minute rule as the other main bots.
+Bot-vs-bot join sampling follows the same five-minute scan cooldown as the cheap random bots.
 
 ## systemd
 
