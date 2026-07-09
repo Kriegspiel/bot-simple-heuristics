@@ -21,20 +21,25 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 import random
+from typing import Any
 
 import requests
 
 BASE_DIR = Path(__file__).resolve().parent
-STATE_PATH = BASE_DIR / ".bot-state.json"
-ENV_PATH = BASE_DIR / ".env"
+DEFAULT_STATE_PATH = BASE_DIR / ".bot-state.json"
+DEFAULT_ENV_PATH = BASE_DIR / ".env"
+STATE_PATH = DEFAULT_STATE_PATH
+ENV_PATH = DEFAULT_ENV_PATH
 DEFAULT_TIMEOUT_SECONDS = 20
 BOT_JOIN_COOLDOWN_SECONDS = int(os.environ.get("BOT_JOIN_COOLDOWN_SECONDS", "300"))
 BOT_GAME_PICK_PROBABILITY = float(os.environ.get("BOT_GAME_PICK_PROBABILITY", "0.05"))
 ASK_ANY_PROBABILITY = float(os.environ.get("ASK_ANY_PROBABILITY", "0.5"))
 MAX_ACTIVE_GAMES = int(os.environ.get("KRIEGSPIEL_MAX_ACTIVE_GAMES", "10"))
+DEFAULT_ACTIVE_GAME_DISCOVERY_LIMIT = 100
 FAILED_MOVE_RETRY_DELAY_SECONDS = 1
 SUPPORTED_RULE_VARIANTS = ("berkeley", "berkeley_any", "wild16")
 DEFAULT_SUPPORTED_RULE_VARIANTS = list(SUPPORTED_RULE_VARIANTS)
@@ -45,10 +50,17 @@ _BOT_PROFILE_SYNCED = False
 
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+_STATE_LOCK = threading.RLock()
 
 
-def load_env_file(path: str | Path = ENV_PATH) -> None:
-    env_path = Path(path)
+def configure_runtime_paths(*, env_path: str | Path | None = None, state_path: str | Path | None = None) -> None:
+    global ENV_PATH, STATE_PATH
+    ENV_PATH = Path(env_path).expanduser().resolve() if env_path else DEFAULT_ENV_PATH
+    STATE_PATH = Path(state_path).expanduser().resolve() if state_path else DEFAULT_STATE_PATH
+
+
+def load_env_file(path: str | Path | None = None) -> None:
+    env_path = Path(path) if path is not None else ENV_PATH
     if not env_path.exists():
         return
 
@@ -73,18 +85,30 @@ def bot_username() -> str:
     return os.environ.get("KRIEGSPIEL_BOT_USERNAME", "").strip().lower()
 
 
-def load_state() -> dict:
+def _load_state_unlocked() -> dict:
     return json.loads(STATE_PATH.read_text()) if STATE_PATH.exists() else {}
 
 
-def save_state(state: dict) -> None:
+def _save_state_unlocked(state: dict) -> None:
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps(state, indent=2))
 
 
+def load_state() -> dict:
+    with _STATE_LOCK:
+        return _load_state_unlocked()
+
+
+def save_state(state: dict) -> None:
+    with _STATE_LOCK:
+        _save_state_unlocked(state)
+
+
 def save_token(token: str) -> None:
-    state = load_state()
-    state["token"] = token
-    save_state(state)
+    with _STATE_LOCK:
+        state = _load_state_unlocked()
+        state["token"] = token
+        _save_state_unlocked(state)
 
 
 def maybe_restore_token() -> None:
@@ -197,6 +221,14 @@ def waiting_games(games: list[dict]) -> list[dict]:
 
 def under_active_game_limit(games: list[dict]) -> bool:
     return len(active_games(games)) < MAX_ACTIVE_GAMES
+
+
+def active_game_discovery_limit() -> int:
+    raw = os.environ.get("KRIEGSPIEL_ACTIVE_GAME_DISCOVERY_LIMIT", str(DEFAULT_ACTIVE_GAME_DISCOVERY_LIMIT)).strip()
+    try:
+        return max(1, min(100, int(raw)))
+    except ValueError:
+        return DEFAULT_ACTIVE_GAME_DISCOVERY_LIMIT
 
 
 def open_bot_lobby_candidates(open_games: list[dict], *, profile_lookup=None) -> list[dict]:
@@ -493,36 +525,177 @@ def maybe_play_game(game_id: str, *, rng: random.Random = random) -> bool:
         excluded_pieces.add(choice_value)
 
 
-def poll_once() -> None:
+def http_status_code(exc: requests.RequestException) -> int | None:
+    response = getattr(exc, "response", None)
+    if response is None:
+        return None
+    status_code = getattr(response, "status_code", None)
+    return int(status_code) if isinstance(status_code, int) else None
+
+
+class GameRunner:
+    def __init__(self, game_id: str, *, poll_seconds: float) -> None:
+        self.game_id = game_id
+        self.poll_seconds = max(0.5, float(poll_seconds))
+        self.stop_event = threading.Event()
+        self.thread = threading.Thread(target=self._run, name=f"simple-heuristics-bot-game-{game_id}", daemon=True)
+        self._started = False
+
+    def start(self) -> None:
+        if self._started:
+            return
+        self._started = True
+        logger.info("%s: starting game runner", self.game_id)
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+
+    def join(self, timeout: float | None = None) -> None:
+        if self._started:
+            self.thread.join(timeout=timeout)
+
+    def is_alive(self) -> bool:
+        return self._started and self.thread.is_alive()
+
+    def _wait(self) -> None:
+        self.stop_event.wait(self.poll_seconds)
+
+    def _run(self) -> None:
+        stop_reason = "stopped"
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    state = get_json(f"/game/{self.game_id}/state")
+                except requests.RequestException as exc:
+                    status_code = http_status_code(exc)
+                    if status_code in {400, 403, 404, 409}:
+                        stop_reason = f"state unavailable http_{status_code}"
+                        break
+                    logger.warning("%s: runner state poll failed: %s", self.game_id, exc)
+                    self._wait()
+                    continue
+
+                state_value = state.get("state")
+                if state_value != "active":
+                    stop_reason = f"state={state_value}"
+                    break
+
+                if state.get("turn") == state.get("your_color"):
+                    try:
+                        maybe_play_game(self.game_id)
+                    except requests.RequestException as exc:
+                        status_code = http_status_code(exc)
+                        if status_code in {400, 403, 404, 409}:
+                            stop_reason = f"play stopped http_{status_code}"
+                            break
+                        logger.warning("%s: runner play failed: %s", self.game_id, exc)
+
+                self._wait()
+        finally:
+            logger.info("%s: stopped game runner (%s)", self.game_id, stop_reason)
+
+
+class GameRunnerScheduler:
+    def __init__(self, *, poll_seconds: float, runner_factory: Any | None = None) -> None:
+        self.poll_seconds = poll_seconds
+        self.runner_factory = runner_factory or (lambda game_id: GameRunner(game_id, poll_seconds=poll_seconds))
+        self.runners: dict[str, Any] = {}
+
+    @staticmethod
+    def game_id_for(game: dict[str, Any]) -> str:
+        return str(game.get("game_id") or "").strip()
+
+    def reconcile(self, games: list[dict[str, Any]]) -> None:
+        active_ids: set[str] = set()
+        for game in active_games(games):
+            game_id = self.game_id_for(game)
+            if not game_id:
+                continue
+            active_ids.add(game_id)
+            runner = self.runners.get(game_id)
+            if runner is not None and runner.is_alive():
+                continue
+            if runner is not None:
+                runner.join(timeout=0)
+            runner = self.runner_factory(game_id)
+            self.runners[game_id] = runner
+            runner.start()
+
+        for game_id, runner in list(self.runners.items()):
+            if game_id in active_ids or runner.is_alive():
+                continue
+            runner.join(timeout=0)
+            self.runners.pop(game_id, None)
+
+        self.prune_finished()
+
+    def prune_finished(self) -> None:
+        for game_id, runner in list(self.runners.items()):
+            if runner.is_alive():
+                continue
+            runner.join(timeout=0)
+            self.runners.pop(game_id, None)
+
+    def stop_all(self) -> None:
+        for runner in list(self.runners.values()):
+            runner.stop()
+        for runner in list(self.runners.values()):
+            runner.join(timeout=2.0)
+        self.runners.clear()
+
+
+def poll_once(scheduler: GameRunnerScheduler | None = None) -> None:
     maybe_sync_bot_profile()
-    mine = get_json("/game/mine/active")
+    path = f"/game/mine/active?limit={active_game_discovery_limit()}" if scheduler is not None else "/game/mine/active"
+    mine = get_json(path)
     games = mine.get("games", [])
     maybe_create_lobby_game(games)
     maybe_join_bot_lobby_game()
+    if scheduler is not None:
+        scheduler.reconcile(games)
+        return
     for game in active_games(games):
         maybe_play_game(game["game_id"])
 
 
 def run_loop(poll_seconds: float) -> None:
-    while True:
-        try:
-            poll_once()
-        except requests.RequestException as exc:
-            logger.warning("poll failed: %s", exc)
-        time.sleep(poll_seconds)
+    discovery_limit = active_game_discovery_limit()
+    logger.info("active-game discovery limit configured: max=%s", discovery_limit)
+    scheduler = GameRunnerScheduler(poll_seconds=poll_seconds)
+    try:
+        while True:
+            try:
+                poll_once(scheduler)
+            except requests.RequestException as exc:
+                logger.warning("poll failed: %s", exc)
+            time.sleep(poll_seconds)
+    finally:
+        scheduler.stop_all()
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Kriegspiel simple heuristics bot")
+    parser.add_argument(
+        "--env-file",
+        default=os.environ.get("KRIEGSPIEL_BOT_ENV_FILE", str(DEFAULT_ENV_PATH)),
+        help="path to the bot instance env file",
+    )
+    parser.add_argument(
+        "--state-file",
+        default=os.environ.get("KRIEGSPIEL_BOT_STATE_FILE", str(DEFAULT_STATE_PATH)),
+        help="path to the bot instance state file",
+    )
     parser.add_argument("--register", action="store_true", help="register the bot and store its bearer token")
     parser.add_argument("--poll-seconds", type=float, default=2.0, help="poll interval between API rounds")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv or sys.argv[1:])
+    configure_runtime_paths(env_path=args.env_file, state_path=args.state_file)
     load_env_file()
     maybe_restore_token()
-    args = parse_args(argv or sys.argv[1:])
 
     if args.register:
         register_bot()
