@@ -25,7 +25,7 @@ Simple heuristic Kriegspiel bot.
 ## Setup
 
 ```bash
-python3 -m venv .venv
+python3.15 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
@@ -66,3 +66,7 @@ files.
 ## systemd
 
 A production host can run the bot as a service with `deploy/kriegspiel-simple-heuristics-bot.service`.
+
+### Python runtime
+
+Use CPython 3.15.2 (see `.python-version`). Production environments are managed by `ks-deploy python-runtime`; keep the system Python unchanged.
