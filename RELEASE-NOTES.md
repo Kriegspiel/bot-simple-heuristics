@@ -5,6 +5,10 @@ current repository state. Add a new section at the top for runtime,
 deployment-facing, or user-visible bot behavior changes. Test-only and
 docs-only changes do not need entries unless they affect operator workflow.
 
+## 1.0.0 — Python 3.15
+
+- Move the supported runtime to CPython 3.15.2 and validate the complete test suite on that interpreter.
+
 ## Current Runtime Baseline
 
 - **Bot Identity**: `simpleheuristics`, the simple tactical heuristic bot.
